@@ -6,6 +6,8 @@ requires-python = ">=3.13"
 dependencies = [
     "dnspython>=2.6,<3.0",
     "duckdb>=1.0",
+    "numpy>=2.4.4",
+    "pandas>=3.0.2",
 ]
 
 [dependency-groups]
