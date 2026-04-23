@@ -5,6 +5,7 @@ from typing import NamedTuple
 
 import dns.exception
 import dns.resolver
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,19 @@ class ResolveResult(NamedTuple):
 
     status: str  # "ok" | "noanswer" | "nxdomain" | "timeout" | "error"
     records: list[tuple[str, int]]
+
+
+@retry(
+    retry=retry_if_exception_type((dns.exception.Timeout, dns.exception.DNSException)),
+    stop=stop_after_attempt(2),
+    wait=wait_fixed(1),
+    reraise=True,
+)
+def _query(
+    res: dns.resolver.Resolver, domain: str, record_type: str
+) -> dns.resolver.Answer:
+    """Resolve with tenacity retry on transient DNS failures."""
+    return res.resolve(domain, record_type)
 
 
 def resolve(
@@ -27,6 +41,9 @@ def resolve(
     Returns a ResolveResult containing a status string and a list of
     (value, ttl) tuples.  The status distinguishes between successful
     resolution, missing records, and different failure modes.
+
+    Transient failures (timeouts, generic DNS errors) are retried up to
+    2 times via tenacity before returning a failure status.
     """
     res = dns.resolver.Resolver()
     res.lifetime = timeout
@@ -34,7 +51,7 @@ def resolve(
         res.nameservers = nameservers
 
     try:
-        answers = res.resolve(domain, record_type)
+        answers = _query(res, domain, record_type)
         rrset = answers.rrset
         assert rrset is not None, f"rrset missing for {record_type} {domain}"
         records = [(record.to_text(), rrset.ttl) for record in answers]
